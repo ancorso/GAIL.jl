@@ -26,24 +26,38 @@ function Base.push!(b::ExperienceBuffer, s, a, r, sp, done, mdp)
     b.next_ind = mod1(b.next_ind + 1,  length(b.r))
 end
 
-function gen_buffer(mdp, pol, N; desired_return = nothing, max_tries = 100*N)
+function trim!(b::ExperienceBuffer)
+    b.elements = b.next_ind -1
+    b.next_ind = 1
+    b.s = b.s[:, 1:b.elements]
+    b.a = b.a[:, 1:b.elements]
+    b.r = b.r[:, 1:b.elements]
+    b.sp = b.sp[:, 1:b.elements]
+    b.done = b.done[:, 1:b.elements]
+end
+
+function gen_buffer(mdp, pol, Neps; desired_return = nothing, max_tries = 100*Neps, max_steps = 100, nonzero_transitions_only = false)
     s = rand(initialstate(mdp))
     odim, adim = length(convert_s(AbstractVector, s, mdp)), length(actions(mdp))
-    b = ExperienceBuffer(odim, adim, N)
+    b = ExperienceBuffer(odim, adim, Neps*max_steps)
     i, eps = 0, 0
-    while length(b) < N && i < max_tries
-        h = simulate(HistoryRecorder(max_steps = 1000), mdp, pol)
+    while eps < Neps && i < max_tries
+        h = simulate(HistoryRecorder(max_steps = max_steps), mdp, pol)
         if isnothing(desired_return) || undiscounted_reward(h) ≈ desired_return
             eps += 1
-            for (s, a, r, sp) in eachstep(h, "(s, a, r, sp)")  
-                push!(b, s, a, r, sp, isterminal(mdp, sp), mdp)
+            for (s, a, r, sp) in eachstep(h, "(s, a, r, sp)")
+                if !nonzero_transitions_only || r != 0
+                    push!(b, s, a, r, sp, isterminal(mdp, sp), mdp)
+                end
             end
         end
         i += 1
     end
+    trim!(b)
+    N = length(b)
     println("eps: ", eps)
     println("Took $eps episodes to fill buffer of size $N, for an average of $(N/eps) steps per ep")
-    @assert length(b) == N
+    # @assert length(b) == N
     b
 end
 

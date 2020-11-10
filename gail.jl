@@ -8,7 +8,7 @@ function BCELoss(D, data, val::Float32, λ_ent)
     vals = D(data[:s])
     yh = sum(vals .* data[:a], dims = 1)
     # Flux.Losses.logitbinarycrossentropy(yh, val)
-    Flux.Losses.binarycrossentropy(yh, val) - λ_ent*entropy(vals)
+    Flux.Losses.binarycrossentropy(yh, val) #- λ_ent*entropy(vals)
 end
 
 function Lᴰ(D, expert, policy, nda, λ_nda, λ_ent)
@@ -28,14 +28,15 @@ function Lᴳ(Q, D, data, γ, maxQ, λ_ent)
     vals = Q(data[:s])
     avals = sum(vals .* data[:a], dims = 1) 
     target = sum(D(data[:s]) .* data[:a], dims = 1) .+ γ .* data[:done] .* maxQ
-    Flux.Losses.huber_loss(avals, target, agg=mean) - λ_ent*entropy(vals)
+    Flux.Losses.huber_loss(avals, target, agg=mean) #- λ_ent*entropy(vals)
 end
 
 function train_Qnetwork!(Q, D, optQ, γ::Float32, pol_data, nda_data, λ_nda, λ_ent)
     pol_maxQ = maximum(Q(pol_data[:sp]), dims=1)
-    nda_maxQ = maximum(Q(nda_data[:sp]), dims=1)
+    # nda_maxQ = maximum(Q(nda_data[:sp]), dims=1)
     θ = Flux.params(Q)
-    loss, back = Flux.pullback(() -> λ_nda*Lᴳ(Q, D, pol_data, γ, pol_maxQ, λ_ent) + (1.f0 - λ_nda)*Lᴳ(Q, D, nda_data, γ, nda_maxQ, λ_ent), θ)
+    # loss, back = Flux.pullback(() -> λ_nda*Lᴳ(Q, D, pol_data, γ, pol_maxQ, λ_ent) + (1.f0 - λ_nda)*Lᴳ(Q, D, nda_data, γ, nda_maxQ, λ_ent), θ)
+    loss, back = Flux.pullback(() -> Lᴳ(Q, D, pol_data, γ, pol_maxQ, λ_ent), θ)
     update!(optQ, θ, back(1f0))
     loss
 end 
@@ -48,7 +49,7 @@ function train_GAIL!(mdp, Q, D, expert_buff::ExperienceBuffer;
                     epochs = 1000, 
                     optQ = ADAM(1e-3), 
                     optD = ADAM(1e-3),
-                    buffer_size = length(expert_buff),
+                    buffer_eps = 10,
                     batch_size = 32, 
                     ϵ = LinearDecaySchedule(1.,0.1, epochs/2),
                     eval_freq = 10,
@@ -58,7 +59,7 @@ function train_GAIL!(mdp, Q, D, expert_buff::ExperienceBuffer;
                     max_eval_steps = 100)
                     
     policy = ChainPolicy(Q, mdp)
-    policy_buff = gen_buffer(mdp, RandomPolicy(mdp), buffer_size)
+    policy_buff = gen_buffer(mdp, RandomPolicy(mdp), buffer_eps)
     s, γ = rand(initialstate(mdp)) , Float32(discount(mdp))
     avgr = -Inf
     logger = TBLogger(logdir, tb_increment)
